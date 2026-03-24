@@ -50,9 +50,47 @@ const PLANO_MENSAL = 4774.60;
 
 // ── STORAGE ───────────────────────────────────────────────────
 const DB_KEY='dwv_diagnosticos_v1';
-function loadDB(){try{return JSON.parse(localStorage.getItem(DB_KEY)||'[]');}catch{return[];}}
-function saveDB(arr){try{localStorage.setItem(DB_KEY,JSON.stringify(arr));}catch{}}
-function addToDB(record){const arr=loadDB();arr.push({...record,id:Date.now(),date:new Date().toISOString()});saveDB(arr);}
+const API_URL='/api/diagnosticos';
+
+// localStorage helpers (cache/fallback)
+function loadLocalDB(){try{return JSON.parse(localStorage.getItem(DB_KEY)||'[]');}catch{return[];}}
+function saveLocalDB(arr){try{localStorage.setItem(DB_KEY,JSON.stringify(arr));}catch{}}
+
+// Main storage — API first, localStorage fallback
+async function loadDB(){
+  try{
+    const res=await fetch(API_URL);
+    if(!res.ok) throw new Error('API '+res.status);
+    const data=await res.json();
+    saveLocalDB(data); // cache locally
+    return data;
+  }catch(e){
+    console.warn('API loadDB failed, using localStorage:',e.message);
+    return loadLocalDB();
+  }
+}
+
+function saveDB(arr){saveLocalDB(arr);}
+
+async function addToDB(record){
+  // Always save to localStorage first (never lose data)
+  const local=loadLocalDB();
+  const localRecord={...record,id:Date.now(),date:new Date().toISOString()};
+  local.push(localRecord);
+  saveLocalDB(local);
+  // Then try API
+  try{
+    const res=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(record)});
+    if(!res.ok) throw new Error('API '+res.status);
+    const saved=await res.json();
+    // Update local cache with server ID
+    localRecord.id=saved.id;
+    localRecord.date=saved.date;
+    saveLocalDB(local);
+  }catch(e){
+    console.warn('API addToDB failed, saved locally:',e.message);
+  }
+}
 
 // ── HELPERS ────────────────────────────────────────────────────
 const fmt=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL',minimumFractionDigits:0,maximumFractionDigits:0}).format(v||0);
@@ -104,11 +142,11 @@ function showNav(activeId){
 function hideNav(){document.getElementById('bottomNav').style.display='none';}
 
 // ── START ──────────────────────────────────────────────────────
-function showStart(){
+async function showStart(){
   hideAll();
   document.getElementById('startScreen').style.display='block';
   showNav('navHome');
-  const db=loadDB();
+  const db=await loadDB();
   const realCount=db.filter(r=>!r.isSim).length;
   document.getElementById('startScreen').innerHTML=`
     <div class="start">
@@ -199,10 +237,10 @@ function canNext(){
 
 function goStep(i){save();currentStep=i;render();}
 function prev(){if(currentStep===0)return;save();currentStep--;render();window.scrollTo({top:0,behavior:'smooth'});}
-function next(){
+async function next(){
   save();
   if(currentStep<STEPS.length-1){currentStep++;render();window.scrollTo({top:0,behavior:'smooth'});}
-  else showResults();
+  else await showResults();
 }
 
 function updateConditionals(){
@@ -463,9 +501,9 @@ function calc(data){
 }
 
 // ── RESULTS ───────────────────────────────────────────────────
-function showResults(){
+async function showResults(){
   const r=calc();
-  if(!isSim) addToDB({...D,results:r,isSim:false});
+  if(!isSim) await addToDB({...D,results:r,isSim:false});
   hideAll();
   document.getElementById('results').style.display='block';
   showNav('navHome');
@@ -704,12 +742,13 @@ function tog(h){const b=h.nextElementSibling;const c=h.querySelector('.chev');co
 function openAll(){document.querySelectorAll('.dbody').forEach(b=>b.classList.add('open'));}
 
 // ── DASHBOARD ─────────────────────────────────────────────────
-function showDashboard(){
+async function showDashboard(){
   hideAll();
   const dash=document.getElementById('dashboard');
   dash.style.display='block';
   showNav('navBI');
-  const records=loadDB().filter(r=>!r.isSim);
+  const allRecords=await loadDB();
+  const records=allRecords.filter(r=>!r.isSim);
   if(records.length===0){
     dash.innerHTML=`
       <div style="font-size:20px;font-weight:500;margin-bottom:20px">BI · Painel Consolidado</div>
@@ -851,13 +890,13 @@ function showDashboard(){
 
 // ── DIAG LIST ────────────────────────────────────────────────
 let dlFilter='all';
-function showDiagList(filter){
+async function showDiagList(filter){
   hideAll();
   if(filter!==undefined) dlFilter=filter;
   const list=document.getElementById('diagList');
   list.style.display='block';
   showNav('navList');
-  let records=loadDB();
+  let records=await loadDB();
   const total=records.length;
   const realCount=records.filter(r=>!r.isSim).length;
   const simCount=records.filter(r=>r.isSim).length;
@@ -908,13 +947,14 @@ function deleteDiag(id){
   showDiagList();
 }
 
-function viewDiag(id){
-  const r=loadDB().find(r=>r.id===id);
+async function viewDiag(id){
+  const all=await loadDB();
+  const r=all.find(r=>r.id===id);
   if(!r)return;
   // Load data into D and show results
   Object.assign(D,r);
   isSim=!!r.isSim;
-  showResults();
+  await showResults();
 }
 
 // ── COPY ──────────────────────────────────────────────────────
