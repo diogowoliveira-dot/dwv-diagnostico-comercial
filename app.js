@@ -59,7 +59,7 @@ function saveLocalDB(arr){try{localStorage.setItem(DB_KEY,JSON.stringify(arr));}
 // Main storage — API first, localStorage fallback
 async function loadDB(){
   try{
-    const res=await fetch(API_URL);
+    const res=await fetch(API_URL,{credentials:'include'});
     if(!res.ok) throw new Error('API '+res.status);
     const data=await res.json();
     saveLocalDB(data); // cache locally
@@ -80,7 +80,7 @@ async function addToDB(record){
   saveLocalDB(local);
   // Then try API
   try{
-    const res=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(record)});
+    const res=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(record),credentials:'include'});
     if(!res.ok) throw new Error('API '+res.status);
     const saved=await res.json();
     // Update local cache with server ID
@@ -90,6 +90,259 @@ async function addToDB(record){
   }catch(e){
     console.warn('API addToDB failed, saved locally:',e.message);
   }
+}
+
+// ── AUTH ──────────────────────────────────────────────────────
+let currentUser=null;
+const fetchOpts={credentials:'include'};
+
+async function checkSession(){
+  try{
+    const res=await fetch('/api/auth',fetchOpts);
+    if(res.ok){currentUser=await res.json();return true;}
+  }catch{}
+  currentUser=null;return false;
+}
+
+async function doLogin(email,password){
+  const res=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password}),credentials:'include'});
+  const data=await res.json();
+  if(!res.ok)throw new Error(data.error||'Erro');
+  currentUser=data;
+  return data;
+}
+
+async function doLogout(){
+  await fetch('/api/auth',{method:'DELETE',credentials:'include'});
+  currentUser=null;
+  showLogin();
+}
+
+function showLogin(errorMsg){
+  hideAll();hideNav();
+  const s=document.getElementById('loginScreen');s.style.display='block';
+  // Check URL params
+  const params=new URLSearchParams(window.location.search);
+  if(params.get('invite')){showInvite(params.get('invite'));return;}
+  if(params.get('reset')){showResetPassword(params.get('reset'));return;}
+  s.innerHTML=`
+    <div class="login-box">
+      <h2>DWV · Diagnostico Comercial</h2>
+      <p class="sub">Faca login para acessar o sistema</p>
+      <div class="login-error" id="loginErr"${errorMsg?' style="display:block"':''}>${errorMsg||''}</div>
+      <form id="loginForm" autocomplete="on" onsubmit="handleLogin(event)">
+        <div class="field"><label>Email</label>
+          <input type="email" id="loginEmail" name="email" autocomplete="email" placeholder="seu@email.com" required/></div>
+        <div class="field"><label>Senha</label>
+          <input type="password" id="loginPass" name="password" autocomplete="current-password" placeholder="Sua senha" required/></div>
+        <button type="submit" class="login-btn" id="loginBtn">Entrar</button>
+      </form>
+      <div class="login-link" onclick="showRecover()">Esqueci minha senha</div>
+    </div>`;
+}
+
+async function handleLogin(e){
+  e.preventDefault();
+  const btn=document.getElementById('loginBtn');
+  const err=document.getElementById('loginErr');
+  btn.disabled=true;btn.textContent='Entrando...';err.style.display='none';
+  try{
+    await doLogin(document.getElementById('loginEmail').value,document.getElementById('loginPass').value);
+    window.history.replaceState({},'','/');
+    await showStart();
+  }catch(ex){
+    err.textContent=ex.message;err.style.display='block';
+    btn.disabled=false;btn.textContent='Entrar';
+  }
+}
+
+function showRecover(){
+  hideAll();hideNav();
+  const s=document.getElementById('loginScreen');s.style.display='block';
+  s.innerHTML=`
+    <div class="login-box">
+      <h2>Recuperar Senha</h2>
+      <p class="sub">Digite seu email para receber o link de recuperacao</p>
+      <div class="login-error" id="recoverErr"></div>
+      <div class="login-success" id="recoverOk"></div>
+      <form onsubmit="handleRecover(event)">
+        <div class="field"><label>Email</label>
+          <input type="email" id="recoverEmail" autocomplete="email" placeholder="seu@email.com" required/></div>
+        <button type="submit" class="login-btn" id="recoverBtn">Enviar Link</button>
+      </form>
+      <div class="login-link" onclick="showLogin()">Voltar para o login</div>
+    </div>`;
+}
+
+async function handleRecover(e){
+  e.preventDefault();
+  const btn=document.getElementById('recoverBtn');btn.disabled=true;btn.textContent='Enviando...';
+  try{
+    const res=await fetch('/api/recover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('recoverEmail').value})});
+    if(!res.ok){const d=await res.json();throw new Error(d.error);}
+    document.getElementById('recoverOk').textContent='Se o email existir no sistema, voce recebera um link de recuperacao.';
+    document.getElementById('recoverOk').style.display='block';
+    btn.textContent='Enviado';
+  }catch(ex){
+    document.getElementById('recoverErr').textContent=ex.message;
+    document.getElementById('recoverErr').style.display='block';
+    btn.disabled=false;btn.textContent='Enviar Link';
+  }
+}
+
+function showResetPassword(token){
+  hideAll();hideNav();
+  const s=document.getElementById('loginScreen');s.style.display='block';
+  s.innerHTML=`
+    <div class="login-box">
+      <h2>Nova Senha</h2>
+      <p class="sub">Defina sua nova senha</p>
+      <div class="login-error" id="resetErr"></div>
+      <div class="login-success" id="resetOk"></div>
+      <form onsubmit="handleReset(event,'${token}')">
+        <div class="field"><label>Nova Senha</label>
+          <input type="password" id="resetPass" autocomplete="new-password" placeholder="Minimo 4 caracteres" required minlength="4"/></div>
+        <div class="field"><label>Confirmar Senha</label>
+          <input type="password" id="resetPass2" autocomplete="new-password" placeholder="Repita a senha" required/></div>
+        <button type="submit" class="login-btn" id="resetBtn">Salvar Senha</button>
+      </form>
+    </div>`;
+}
+
+async function handleReset(e,token){
+  e.preventDefault();
+  const p1=document.getElementById('resetPass').value,p2=document.getElementById('resetPass2').value;
+  if(p1!==p2){document.getElementById('resetErr').textContent='Senhas nao conferem';document.getElementById('resetErr').style.display='block';return;}
+  const btn=document.getElementById('resetBtn');btn.disabled=true;btn.textContent='Salvando...';
+  try{
+    const res=await fetch('/api/recover?action=reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,password:p1})});
+    const d=await res.json();if(!res.ok)throw new Error(d.error);
+    document.getElementById('resetOk').textContent='Senha alterada! Redirecionando...';document.getElementById('resetOk').style.display='block';
+    setTimeout(()=>{window.history.replaceState({},'','/');showLogin();},2000);
+  }catch(ex){
+    document.getElementById('resetErr').textContent=ex.message;document.getElementById('resetErr').style.display='block';
+    btn.disabled=false;btn.textContent='Salvar Senha';
+  }
+}
+
+function showInvite(token){
+  hideAll();hideNav();
+  const s=document.getElementById('loginScreen');s.style.display='block';
+  s.innerHTML=`
+    <div class="login-box">
+      <h2>Bem-vindo!</h2>
+      <p class="sub">Defina sua senha para acessar o DWV Diagnostico Comercial</p>
+      <div class="login-error" id="inviteErr"></div>
+      <div class="login-success" id="inviteOk"></div>
+      <form onsubmit="handleInvite(event,'${token}')">
+        <div class="field"><label>Senha</label>
+          <input type="password" id="invitePass" autocomplete="new-password" placeholder="Minimo 4 caracteres" required minlength="4"/></div>
+        <div class="field"><label>Confirmar Senha</label>
+          <input type="password" id="invitePass2" autocomplete="new-password" placeholder="Repita a senha" required/></div>
+        <button type="submit" class="login-btn" id="inviteBtn">Definir Senha</button>
+      </form>
+    </div>`;
+}
+
+async function handleInvite(e,token){
+  e.preventDefault();
+  const p1=document.getElementById('invitePass').value,p2=document.getElementById('invitePass2').value;
+  if(p1!==p2){document.getElementById('inviteErr').textContent='Senhas nao conferem';document.getElementById('inviteErr').style.display='block';return;}
+  const btn=document.getElementById('inviteBtn');btn.disabled=true;btn.textContent='Salvando...';
+  try{
+    const res=await fetch('/api/users?action=accept-invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,password:p1})});
+    const d=await res.json();if(!res.ok)throw new Error(d.error);
+    document.getElementById('inviteOk').textContent='Senha definida! Redirecionando para login...';document.getElementById('inviteOk').style.display='block';
+    setTimeout(()=>{window.history.replaceState({},'','/');showLogin();},2000);
+  }catch(ex){
+    document.getElementById('inviteErr').textContent=ex.message;document.getElementById('inviteErr').style.display='block';
+    btn.disabled=false;btn.textContent='Definir Senha';
+  }
+}
+
+// ── USERS PANEL ──────────────────────────────────────────────
+async function showUsers(){
+  if(!currentUser||currentUser.role!=='master'){await showStart();return;}
+  hideAll();
+  const s=document.getElementById('usersScreen');s.style.display='block';
+  showNav('navUsers');
+  try{
+    const res=await fetch('/api/users',fetchOpts);
+    if(!res.ok)throw new Error('Falha ao carregar');
+    const users=await res.json();
+    s.innerHTML=`
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div>
+          <div style="font-size:20px;font-weight:500">Usuarios</div>
+          <div style="font-size:12px;color:var(--mu)">${users.length} cadastrados</div>
+        </div>
+        <button class="btn-start btn-real" style="padding:8px 16px;font-size:13px;border-radius:8px" onclick="showNewUserForm()">+ Novo Usuario</button>
+      </div>
+      <div id="newUserArea"></div>
+      <div id="usersList">${users.map(u=>`
+        <div class="user-card">
+          <div class="user-info">
+            <div class="user-name">${u.name}</div>
+            <div class="user-meta">
+              <span>${u.email}</span>
+              <span class="user-role ${u.status==='pendente'?'pendente':u.role}">${u.status==='pendente'?'Pendente':u.role==='master'?'Master':'Usuario'}</span>
+              ${u.status==='pendente'?'':'<span>'+u.status+'</span>'}
+            </div>
+          </div>
+          <div class="user-actions">
+            ${u.id!==currentUser.id?`<button onclick="deleteUser(${u.id},'${u.name}')" title="Excluir">&#10005;</button>`:'<span style="font-size:10px;color:var(--mu)">voce</span>'}
+          </div>
+        </div>`).join('')}</div>`;
+  }catch(ex){
+    s.innerHTML='<div class="empty-state">Erro ao carregar usuarios: '+ex.message+'</div>';
+  }
+}
+
+function showNewUserForm(){
+  document.getElementById('newUserArea').innerHTML=`
+    <div class="user-form">
+      <h3>Convidar Novo Usuario</h3>
+      <div class="login-error" id="newUserErr"></div>
+      <div class="login-success" id="newUserOk"></div>
+      <div class="g2">
+        <div class="field"><label>Nome</label><input type="text" id="nuName" placeholder="Nome completo" required/></div>
+        <div class="field"><label>Email</label><input type="email" id="nuEmail" placeholder="email@exemplo.com" required/></div>
+      </div>
+      <div class="field"><label>Cargo</label>
+        <select id="nuRole"><option value="user">Usuario</option><option value="master">Master (administrador)</option></select></div>
+      <div style="display:flex;gap:10px">
+        <button class="login-btn" style="flex:1" onclick="createUser()">Enviar Convite</button>
+        <button class="bto" onclick="document.getElementById('newUserArea').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function createUser(){
+  const name=document.getElementById('nuName').value.trim();
+  const email=document.getElementById('nuEmail').value.trim();
+  const role=document.getElementById('nuRole').value;
+  if(!name||!email)return;
+  try{
+    const res=await fetch('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,role}),credentials:'include'});
+    const d=await res.json();if(!res.ok)throw new Error(d.error);
+    if(d.inviteLink){
+      document.getElementById('newUserOk').innerHTML='Convite criado! <strong>RESEND_API_KEY nao configurada</strong> — copie o link:<br><input type="text" value="'+d.inviteLink+'" style="width:100%;margin-top:6px;font-size:11px" onclick="this.select()"/>';
+    }else{
+      document.getElementById('newUserOk').textContent='Convite enviado para '+email;
+    }
+    document.getElementById('newUserOk').style.display='block';
+    setTimeout(()=>showUsers(),3000);
+  }catch(ex){
+    document.getElementById('newUserErr').textContent=ex.message;document.getElementById('newUserErr').style.display='block';
+  }
+}
+
+async function deleteUser(id,name){
+  if(!confirm('Excluir o usuario "'+name+'"?'))return;
+  try{
+    await fetch('/api/users?id='+id,{method:'DELETE',credentials:'include'});
+    await showUsers();
+  }catch{}
 }
 
 // ── HELPERS ────────────────────────────────────────────────────
@@ -131,6 +384,8 @@ function hideAll(){
   document.getElementById('results').style.display='none';
   document.getElementById('dashboard').style.display='none';
   document.getElementById('diagList').style.display='none';
+  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('usersScreen').style.display='none';
 }
 function showNav(activeId){
   const nav=document.getElementById('bottomNav');
@@ -138,8 +393,15 @@ function showNav(activeId){
   document.querySelectorAll('.bnav-item').forEach(b=>b.classList.remove('active'));
   const el=document.getElementById(activeId);
   if(el)el.classList.add('active');
+  // Show Users tab only for master
+  document.getElementById('navUsers').style.display=currentUser&&currentUser.role==='master'?'flex':'none';
+  // Show logout button
+  document.getElementById('logoutBtn').style.display=currentUser?'block':'none';
 }
-function hideNav(){document.getElementById('bottomNav').style.display='none';}
+function hideNav(){
+  document.getElementById('bottomNav').style.display='none';
+  document.getElementById('logoutBtn').style.display='none';
+}
 
 // ── START ──────────────────────────────────────────────────────
 async function showStart(){
@@ -1164,4 +1426,10 @@ ${D.observations?`<h2>Observações</h2><div class="box">${D.observations}</div>
 }
 
 // ── INIT ──────────────────────────────────────────────────────
-showStart();
+(async()=>{
+  const params=new URLSearchParams(window.location.search);
+  if(params.get('invite')||params.get('reset')){showLogin();return;}
+  const loggedIn=await checkSession();
+  if(loggedIn)await showStart();
+  else showLogin();
+})();

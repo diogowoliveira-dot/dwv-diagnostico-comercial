@@ -1,4 +1,5 @@
 const { sql } = require('@vercel/postgres');
+const { getSessionUser, ensureUsersTable } = require('./auth');
 
 async function ensureTable() {
   await sql`
@@ -16,9 +17,10 @@ async function ensureTable() {
 
 module.exports = async function handler(req, res) {
   // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
@@ -52,6 +54,9 @@ module.exports = async function handler(req, res) {
     }
 
     if (req.method === 'DELETE') {
+      await ensureUsersTable();
+      const user = await getSessionUser(req);
+      if (!user || user.role !== 'master') return res.status(403).json({ error: 'Apenas master pode deletar' });
       const { id } = req.query || {};
       if (id) {
         await sql`DELETE FROM diagnosticos WHERE id = ${parseInt(id)}`;
