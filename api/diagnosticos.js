@@ -18,7 +18,7 @@ async function ensureTable() {
 module.exports = async function handler(req, res) {
   // CORS
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -51,6 +51,19 @@ module.exports = async function handler(req, res) {
         RETURNING id, created_at
       `;
       return res.status(201).json({ id: rows[0].id, date: rows[0].created_at });
+    }
+
+    if (req.method === 'PATCH') {
+      const { id, consultantName, bulkConsultant } = req.body || {};
+      if (bulkConsultant) {
+        await sql`UPDATE diagnosticos SET consultant_name = ${bulkConsultant} WHERE consultant_name IS NULL OR consultant_name = ''`;
+        return res.status(200).json({ updated: 'all-empty' });
+      }
+      if (id && consultantName !== undefined) {
+        await sql`UPDATE diagnosticos SET consultant_name = ${consultantName} WHERE id = ${parseInt(id)}`;
+        return res.status(200).json({ updated: parseInt(id) });
+      }
+      return res.status(400).json({ error: 'id + consultantName or bulkConsultant required' });
     }
 
     if (req.method === 'DELETE') {
