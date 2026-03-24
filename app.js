@@ -1018,12 +1018,15 @@ async function showDashboard(){
     return;
   }
   const N=records.length;
-  const avgTE=records.reduce((a,r)=>a+(r.results?.te||0),0)/N;
-  const avgDC=records.reduce((a,r)=>a+(r.results?.dc||0),0)/N;
+  const _te=r=>r.totalBrokers>0?(r.activeBrokers/r.totalBrokers)*100:0;
+  const _dc=r=>r.totalVGV>0?r.activeBrokers/(r.totalVGV/1e6):0;
+  const _gap=r=>(r.vgvGoal||0)-(r.totalVGV||0);
+  const avgTE=records.reduce((a,r)=>a+_te(r),0)/N;
+  const avgDC=records.reduce((a,r)=>a+_dc(r),0)/N;
   const withTZ=records.filter(r=>r.tabelaZero).length;
   const withCRM=records.filter(r=>r.hasCRM).length;
   const withHouse=records.filter(r=>r.hasHouse).length;
-  const totalGap=records.reduce((a,r)=>a+(r.results?.gap||0),0);
+  const totalGap=records.reduce((a,r)=>a+_gap(r),0);
   const toolFreq={};TOOLS_DEF.forEach(t=>{toolFreq[t.k]=records.filter(r=>r[t.k]).length;});
   const topTools=TOOLS_DEF.map(t=>({l:t.l,n:toolFreq[t.k]})).sort((a,b)=>b.n-a.n).filter(t=>t.n>0);
   const chalFreq={};Object.keys(CHAL_LABELS).forEach(k=>{chalFreq[k]=records.filter(r=>(r.challenges||[]).includes(k)).length;});
@@ -1047,16 +1050,16 @@ async function showDashboard(){
       <table class="dt">
         <thead><tr><th>Empresa</th><th>Local</th><th>Consultor</th><th>TE</th><th>DC/M</th><th>Ativos/Total</th><th>Gap VGV</th><th>House</th><th>Tab. Zero</th><th>CRM</th></tr></thead>
         <tbody>${records.map(r=>{
-          const te=r.results?.te||0;const tc=te<15?'r':te<30?'a':'g';
+          const te=_te(r);const tc=te<15?'r':te<30?'a':'g';
           const tzA=(r.tabelaZeroAccess||[]).map(k=>({house:'House',parcerias:'H+P',imobiliarias:'Imob.',todos:'Todos'}[k]||k)).join(', ');
           return`<tr>
             <td><div class="co-name">${r.companyName||'—'}</div><div class="co-sub">${r.responsibleName||''}</div></td>
             <td style="font-size:11px;color:var(--mu)">${r.location||'—'}</td>
             <td style="font-size:11px;color:var(--mu)">${r.consultantName||'—'}</td>
             <td><span class="te-pill ${tc}">${fmtP(te)}</span></td>
-            <td style="font-size:12px">${(r.results?.dc||0).toFixed(2)}</td>
+            <td style="font-size:12px">${_dc(r).toFixed(2)}</td>
             <td style="font-size:12px">${fmtN(r.activeBrokers)} / ${fmtN(r.totalBrokers)}<div class="bar-wrap"><div class="bar-fill" style="width:${Math.min(te,100)}%;background:${te<15?'var(--red)':te<30?'var(--am)':'var(--gr)'}"></div></div></td>
-            <td style="font-size:12px;color:var(--red)">${fmt(r.results?.gap||0)}</td>
+            <td style="font-size:12px;color:var(--red)">${fmt(_gap(r))}</td>
             <td style="font-size:11px">${r.hasHouse?'✓':'—'}</td>
             <td style="font-size:11px">${r.tabelaZero?'✓ '+tzA:'—'}</td>
             <td style="font-size:11px">${r.hasCRM?r.crmName||'Sim':'—'}</td>
@@ -1158,6 +1161,9 @@ async function showDiagList(filter){
   const list=document.getElementById('diagList');
   list.style.display='block';
   showNav('navList');
+  const _te=r=>r.totalBrokers>0?(r.activeBrokers/r.totalBrokers)*100:0;
+  const _dc=r=>r.totalVGV>0?r.activeBrokers/(r.totalVGV/1e6):0;
+  const _gap=r=>(r.vgvGoal||0)-(r.totalVGV||0);
   let records=await loadDB();
   const total=records.length;
   const realCount=records.filter(r=>!r.isSim).length;
@@ -1182,7 +1188,7 @@ async function showDiagList(filter){
       <button class="dl-filter ${dlFilter==='sim'?'active':''}" onclick="showDiagList('sim')">Simulacoes (${simCount})</button>
     </div>
     <div id="dlCards">${records.map(r=>{
-      const te=r.results?.te||0;const tc=te<15?'r':te<30?'a':'g';
+      const te=_te(r);const tc=te<15?'r':te<30?'a':'g';
       const d=r.date?new Date(r.date).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'}):'—';
       return`<div class="dl-card" onclick="viewDiag(${r.id})">
         <div class="dl-info">
