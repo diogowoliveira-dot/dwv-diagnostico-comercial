@@ -895,7 +895,6 @@ function showDiagList(filter){
           </div>
         </div>
         <div class="dl-actions">
-          <button class="dl-del" onclick="event.stopPropagation();deleteDiag(${r.id})" title="Excluir">&#10005;</button>
           <span class="dl-chev">&#8250;</span>
         </div>
       </div>`;
